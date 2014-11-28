@@ -49,63 +49,60 @@ EMPTY_DICT = {}
 
 class Notifier():
     class Notification():
-        def __init__(self, summary, body, app_icon=None, actions=EMPTY_DICT, timeout=-1, obj=None, replaces_id=0):
+        def __init__(self, summary, body, app_icon=None, actions=[], timeout=-1, obj=None, replaces=None):
             self.id = 0
             self.summary = summary
             self.body = body
             self.app_icon = app_icon
             # actions should be dict with { text_on_button: callback_handler }
-            self.actions = actions if actions is not None else EMPTY_DICT
+            self.actions = actions if actions is not None else []
             self.timeout = timeout
             self.obj = obj
-            self.replaces_id = replaces_id
+            self.replaces_id = replaces.id if replaces is not None else 0
 
-    def __init__(self, session_bus, app_name, app_icon="dialog-information"):
+    def __init__(self, session_bus, app_name, app_icon="dialog-information", default_timeout=-1):
         self.notifyd = dbus.Interface(session_bus.get_object(NOTIFY_NAME, NOTIFY_PATH), NOTIFY_IFACE)
         self.notifications = {}
 
         self.app_name = app_name
         self.app_icon = app_icon
+        self.default_timeout = default_timeout
 
         self.notifyd.connect_to_signal("NotificationClosed", self._handle_notification_closed_signal)
         self.notifyd.connect_to_signal("ActionInvoked", self._handle_action_invoked_signal)
 
-        x = self.notifyd.Notify("pybatterymonitor",  # app_name
-                                 0,  # replaces_id
-                                 "dialog-information",  # app_icon
-                                 "101%",  # summary
-                                 "Consider looking at this.",  # body
-                                 ["CANES", "CANES"],  # actions
-                                 EMPTY_DICT,  # hints
-                                 -1)  # expire_timeout
+    def _handle_notification_closed_signal(self, id, reason):
+        if id in self.notifications:
+            del self.notifications[id]
 
-        self.send_notification(Notifier.Notification("120%", "Canes Af", actions={"Button": lambda x: print("Hi")}))
+    def _handle_action_invoked_signal(self, id, action):
+        if id in self.notifications:
+            for i, a in enumerate(self.notifications[id].actions):
+                if i % 2 == 0 and a == action:
+                    break
+            callback = self.notifications[id].actions[i+1]
+            if callback is not None:
+                callback()
 
-    def _handle_notification_closed_signal(self, *posargs, **kwargs):
-        print("--- NotificationClosed ---")
-        for i, p in enumerate(posargs):
-            print("{}: {}".format(i, p))
-        for k, a in kwargs.items():
-            print("{}: {}".format(k, a))
-
-    def _handle_action_invoked_signal(self, *posargs, **kwargs):
-        print("--- ActionInvoked ---")
-        for i, p in enumerate(posargs):
-            print("{}: {}".format(i, p))
-        for k, a in kwargs.items():
-            print("{}: {}".format(k, a))
-
-    def send_notification(self, notification):
+    def send(self, notification):
         id = self.notifyd.Notify(self.app_name,
                                  notification.replaces_id,  # Could add check here for id in self.notifications
                                  notification.app_icon if notification.app_icon is not None else self.app_icon,
                                  notification.summary,
                                  notification.body,
-                                 [k for k in notification.actions.keys() for i in range(2)],
+                                 [x for x in notification.actions[::2] for i in range(2)],
                                  EMPTY_DICT,  # We don't add any hints
-                                 notification.timeout)
+                                 notification.timeout if notification.timeout != -1 else self.default_timeout)
         notification.id = id
         self.notifications[id] = notification
+
+    def close(self, notification):
+        if notification.id != 0:
+            self.notifyd.CloseNotification(notification.id)
+
+    def close_all(self):
+        for notification in self.notifications.values():
+            self.close(notification)
 
 
 class BatteryMonitor(dbus.service.Object):
@@ -126,7 +123,7 @@ class BatteryMonitor(dbus.service.Object):
         dbus.service.Object.__init__(self, bus_name, MY_PATH)
 
         self.notifier = Notifier(self.session_bus, "pybatterymonitor")
-        self.notifications = {}
+
         self.battery = None
         self.discharging = None
         self.next_warning = None
@@ -178,10 +175,20 @@ class BatteryMonitor(dbus.service.Object):
 
     def warn(self, percentage):
         if self.discharging:
-            warn_string = "Battery is now at {} percent. Consider ending discharge.".format(percentage)
+            text = "Consider ending discharge."
         else:
-            warn_string = "Battery is now at {} percent. Consider ending charge.".format(percentage)
-        log.warning("WARNING: " + warn_string)
+            text = "Consider ending charge."
+        self.notifier.send(Notifier.Notification("{}%".format(percentage),
+                                                 text,
+                                                 app_icon=None,
+                                                 actions=["Suppress Future", self.suppress_future,
+                                                          "Dismiss", lambda: print("CANES")]))
+        log.warning("WARNING: Battery is now at {} percent. {}".format(percentage, text))
+
+    def suppress_future(self):
+        log.info("Suppressing future warnings for this state change")
+        self.next_warning = None
+        log.info("- next warning: {}".format(self.next_warning))
 
     def update_percentage(self, new_percentage):
         # If percentage and state matches that of next_warning, then warn,
@@ -223,6 +230,7 @@ class BatteryMonitor(dbus.service.Object):
 
     def update_warnings(self):
         log.info("New warning set generated")
+        self.notifier.close_all()
         self.warning_generator = self.new_warning_generator()
         self.next_warning = next(self.warning_generator, None)
 
@@ -240,8 +248,6 @@ if __name__ == "__main__":
     from dbus.mainloop.glib import DBusGMainLoop
     from gi.repository.GObject import MainLoop
     DBusGMainLoop(set_as_default=True)
-    BatteryMonitor(dbus.SystemBus(), dbus.SessionBus(),
-                   discharge_warn_values=[38,39,40,41,42,43,44,45,46,47,48,49,50],
-                   charge_warn_values=[39,40,41,42,43,44,45,46,47,48,49,50,51])
+    BatteryMonitor(dbus.SystemBus(), dbus.SessionBus(),lower_bound=80, upper_bound=40, warn_step=1)
     MainLoop().run()
 
