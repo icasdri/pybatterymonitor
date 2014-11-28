@@ -31,10 +31,6 @@ UPOWER_PATH = "/org/freedesktop/UPower"
 UPOWER_IFACE = UPOWER_NAME
 DEV_IFACE = "org.freedesktop.UPower.Device"
 
-NOTIFY_NAME = "org.freedesktop.Notifications"
-NOTIFY_PATH = "/org/freedesktop/Notifications"
-NOTIFY_IFACE = NOTIFY_NAME
-
 DEVICE_TYPES = {"Unknown": 0, "Line Power": 1, "Battery": 2}
 BATTERY_STATES = {0: "Unknown",
                   1: "Charging",
@@ -43,6 +39,74 @@ BATTERY_STATES = {0: "Unknown",
                   4: "Fully Charged",
                   5: "Pending Charge",
                   6: "Pending Discharge"}
+
+NOTIFY_NAME = "org.freedesktop.Notifications"
+NOTIFY_PATH = "/org/freedesktop/Notifications"
+NOTIFY_IFACE = NOTIFY_NAME
+
+EMPTY_DICT = {}
+
+
+class Notifier():
+    class Notification():
+        def __init__(self, summary, body, app_icon=None, actions=EMPTY_DICT, timeout=-1, obj=None, replaces_id=0):
+            self.id = 0
+            self.summary = summary
+            self.body = body
+            self.app_icon = app_icon
+            # actions should be dict with { text_on_button: callback_handler }
+            self.actions = actions if actions is not None else EMPTY_DICT
+            self.timeout = timeout
+            self.obj = obj
+            self.replaces_id = replaces_id
+
+    def __init__(self, session_bus, app_name, app_icon="dialog-information"):
+        self.notifyd = dbus.Interface(session_bus.get_object(NOTIFY_NAME, NOTIFY_PATH), NOTIFY_IFACE)
+        self.notifications = {}
+
+        self.app_name = app_name
+        self.app_icon = app_icon
+
+        self.notifyd.connect_to_signal("NotificationClosed", self._handle_notification_closed_signal)
+        self.notifyd.connect_to_signal("ActionInvoked", self._handle_action_invoked_signal)
+
+        x = self.notifyd.Notify("pybatterymonitor",  # app_name
+                                 0,  # replaces_id
+                                 "dialog-information",  # app_icon
+                                 "101%",  # summary
+                                 "Consider looking at this.",  # body
+                                 ["CANES", "CANES"],  # actions
+                                 EMPTY_DICT,  # hints
+                                 -1)  # expire_timeout
+
+        self.send_notification(Notifier.Notification("120%", "Canes Af", actions={"Button": lambda x: print("Hi")}))
+
+    def _handle_notification_closed_signal(self, *posargs, **kwargs):
+        print("--- NotificationClosed ---")
+        for i, p in enumerate(posargs):
+            print("{}: {}".format(i, p))
+        for k, a in kwargs.items():
+            print("{}: {}".format(k, a))
+
+    def _handle_action_invoked_signal(self, *posargs, **kwargs):
+        print("--- ActionInvoked ---")
+        for i, p in enumerate(posargs):
+            print("{}: {}".format(i, p))
+        for k, a in kwargs.items():
+            print("{}: {}".format(k, a))
+
+    def send_notification(self, notification):
+        id = self.notifyd.Notify(self.app_name,
+                                 notification.replaces_id,  # Could add check here for id in self.notifications
+                                 notification.app_icon if notification.app_icon is not None else self.app_icon,
+                                 notification.summary,
+                                 notification.body,
+                                 [k for k in notification.actions.keys() for i in range(2)],
+                                 EMPTY_DICT,  # We don't add any hints
+                                 notification.timeout)
+        notification.id = id
+        self.notifications[id] = notification
+
 
 class BatteryMonitor(dbus.service.Object):
     def __init__(self, system_bus, session_bus, lower_bound=40, upper_bound=80, warn_step=5,
@@ -61,16 +125,7 @@ class BatteryMonitor(dbus.service.Object):
         bus_name = dbus.service.BusName(MY_IFACE, bus=self.session_bus)
         dbus.service.Object.__init__(self, bus_name, MY_PATH)
 
-        self.notifier = dbus.Interface(self.session_bus.get_object(NOTIFY_NAME, NOTIFY_PATH), NOTIFY_IFACE)
-        x = self.notifier.Notify("pybatterymonitor",  # app_name
-                                 0,  # replaces_id
-                                 "dialog-information",  # app_icon
-                                 "101%",  # summary
-                                 "Consider looking at this.",  # body
-                                 [],  # actions
-                                 {},  # hints
-                                 -1)  # expire_timeout
-
+        self.notifier = Notifier(self.session_bus, "pybatterymonitor")
         self.notifications = {}
         self.battery = None
         self.discharging = None
@@ -86,7 +141,9 @@ class BatteryMonitor(dbus.service.Object):
             if dev_props.Get(DEV_IFACE, "Type") == DEVICE_TYPES["Battery"] and \
                             dev_props.Get(DEV_IFACE, "PowerSupply") == True:
                 self.battery = dev_props
-                log.info("Found battery {} {}".format(dev_props.Get(DEV_IFACE, "Vendor"), dev_props.Get(DEV_IFACE, "Model")))
+                log.info("Found battery {} {}".format(
+                    dev_props.Get(DEV_IFACE, "Vendor"),
+                    dev_props.Get(DEV_IFACE, "Model")))
                 self.update_state(self.battery.Get(DEV_IFACE, "State"))
                 self.update_warnings()
                 self.update_percentage(self.battery.Get(DEV_IFACE, "Percentage"))
