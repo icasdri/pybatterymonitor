@@ -66,54 +66,78 @@ class BatteryMonitor(dbus.service.Object):
                             dev_props.Get(DEV_IFACE, "PowerSupply") == True:
                 self.battery = dev_props
                 log.info("Found battery {} {}".format(dev_props.Get(DEV_IFACE, "Vendor"), dev_props.Get(DEV_IFACE, "Model")))
-                self.update_percentage(self.battery.Get(DEV_IFACE, "Percentage"))
                 self.update_state(self.battery.Get(DEV_IFACE, "State"))
                 self.update_warnings()
+                self.update_percentage(self.battery.Get(DEV_IFACE, "Percentage"))
                 self.battery.connect_to_signal("PropertiesChanged", self.handle_battery_signal)
                 break
         else:
             log.warning("No Battery device found!")
 
     def handle_battery_signal(self, interface, data, signature):
-        if "Percentage" in data:
-            self.update_percentage(data["Percentage"])
         if "State" in data:
             self.update_state(data["State"])
+        if "Percentage" in data:
+            self.update_percentage(data["Percentage"])
 
     def new_warning_generator(self):
         if self.discharging:
             for i in range(self.lower_bound, 0, -self.warn_step):
-                yield (True, i)
-            yield (True, 0)
+                yield i
+            yield 0
         else:
             for i in range(self.upper_bound, 100, self.warn_step):
-                yield (False, i)
-            yield (False, 100)
+                yield i
+            yield 100
 
     def warn(self, percentage):
         if self.discharging:
-            warn_string = "Battery is now at {} percent. Consider ending discharge."
+            warn_string = "Battery is now at {} percent. Consider ending discharge.".format(percentage)
         else:
-            warn_string = "Battery is now at {} percent. Consider ending charge."
-        log.warning(warn_string)
+            warn_string = "Battery is now at {} percent. Consider ending charge.".format(percentage)
+        log.warning("WARNING: " + warn_string)
 
     def update_percentage(self, new_percentage):
         # If percentage and state matches that of next_warning, then warn,
         # and pop a warning from the warning generator and put it at next_warning
         # If next_warning is None, do nothing
-        log.info("Battery now at {} percent".format(new_percentage))
+
+        def adjust_warnings_if_offset():
+            if not abs(new_percentage - self.next_warning) < self.warn_step:
+                log.info("Adjusting for warning offset")
+                for w in self.warning_generator:
+                    print(" -- -- discarding {}".format(w))
+                    if abs(new_percentage - w) < self.warn_step:
+                        break
+
+        if self.next_warning is not None:
+            if self.discharging:
+                if new_percentage <= self.next_warning:
+                    adjust_warnings_if_offset()
+                    self.warn(new_percentage)
+                    self.next_warning = next(self.warning_generator, None)
+            else:
+                if new_percentage >= self.next_warning:
+                    adjust_warnings_if_offset()
+                    self.warn(new_percentage)
+                    self.next_warning = next(self.warning_generator, None)
+
+        log.info(" -- new percentage: {}".format(new_percentage))
+        log.info(" -- next warning: {}".format(self.next_warning))
 
     def update_state(self, new_state):
         # If discharge/charge changes, make a new Warning Generator to match the change
         if BATTERY_STATES[new_state] in ("Discharging", "Empty", "Pending Discharge"):
+            #print("New State: True, Old State: {}".format(self.discharging))
             if not self.discharging:
                 self.discharging = True
                 self.update_warnings()
         elif BATTERY_STATES[new_state] in ("Charging", "Fully Charged", "Pending Charge"):
+            #print("New State: False, Old State: {}".format(self.discharging))
             if self.discharging:
                 self.discharging = False
                 self.update_warnings()
-        log.info("Battery is now {}".format(BATTERY_STATES[new_state]))
+        log.info(" -- new state: {}".format(BATTERY_STATES[new_state]))
 
     def update_warnings(self):
         log.info("New warning set generated")
