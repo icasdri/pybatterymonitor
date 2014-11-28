@@ -16,7 +16,6 @@ import dbus
 import dbus.service
 import sys
 import logging
-from gi.repository import Notify
 
 log = logging.getLogger(__name__)
 log.setLevel(logging.DEBUG)
@@ -31,6 +30,10 @@ UPOWER_NAME = "org.freedesktop.UPower"
 UPOWER_PATH = "/org/freedesktop/UPower"
 UPOWER_IFACE = UPOWER_NAME
 DEV_IFACE = "org.freedesktop.UPower.Device"
+
+NOTIFY_NAME = "org.freedesktop.Notifications"
+NOTIFY_PATH = "/org/freedesktop/Notifications"
+NOTIFY_IFACE = NOTIFY_NAME
 
 DEVICE_TYPES = {"Unknown": 0, "Line Power": 1, "Battery": 2}
 BATTERY_STATES = {0: "Unknown",
@@ -57,8 +60,18 @@ class BatteryMonitor(dbus.service.Object):
         self.session_bus = session_bus
         bus_name = dbus.service.BusName(MY_IFACE, bus=self.session_bus)
         dbus.service.Object.__init__(self, bus_name, MY_PATH)
-        Notify.init("pybatterymonitor")
 
+        self.notifier = dbus.Interface(self.session_bus.get_object(NOTIFY_NAME, NOTIFY_PATH), NOTIFY_IFACE)
+        x = self.notifier.Notify("pybatterymonitor",  # app_name
+                                 0,  # replaces_id
+                                 "dialog-information",  # app_icon
+                                 "101%",  # summary
+                                 "Consider looking at this.",  # body
+                                 [],  # actions
+                                 {},  # hints
+                                 -1)  # expire_timeout
+
+        self.notifications = {}
         self.battery = None
         self.discharging = None
         self.next_warning = None
@@ -109,11 +122,8 @@ class BatteryMonitor(dbus.service.Object):
     def warn(self, percentage):
         if self.discharging:
             warn_string = "Battery is now at {} percent. Consider ending discharge.".format(percentage)
-            warn_notification = Notify.Notification.new("{}%".format(percentage), "Consider ending discharge.", "dialog-information")
         else:
             warn_string = "Battery is now at {} percent. Consider ending charge.".format(percentage)
-            warn_notification = Notify.Notification.new("{}%".format(percentage), "Consider ending charge.", "dialog-information")
-        warn_notification.show()
         log.warning("WARNING: " + warn_string)
 
     def update_percentage(self, new_percentage):
