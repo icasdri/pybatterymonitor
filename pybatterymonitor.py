@@ -16,7 +16,6 @@ import dbus
 import dbus.service
 import sys
 import logging
-from requests.sessions import session
 
 log = logging.getLogger(__name__)
 log.setLevel(logging.DEBUG)
@@ -57,8 +56,9 @@ class BatteryMonitor(dbus.service.Object):
         self.system_bus.add_signal_receiver(self.handle_unlock_signal,
                                             signal_name="Unlock",
                                             dbus_interface=LOGIND_SESSION_IFACE)
-
         self.battery = None
+        self.percentage = None
+        self.discharging = None
         self.init_battery()
 
     def init_battery(self):
@@ -69,6 +69,8 @@ class BatteryMonitor(dbus.service.Object):
                             dev_props.Get(DEV_IFACE, "PowerSupply") == True:
                 self.battery = dev_props
                 log.info("Found battery {} {}".format(dev_props.Get(DEV_IFACE, "Vendor"), dev_props.Get(DEV_IFACE, "Model")))
+                self.percentage = self.battery.Get(DEV_IFACE, "Percentage")
+                self.discharging =
                 self.battery.connect_to_signal("PropertiesChanged", self.handle_battery_signal)
                 break
         else:
@@ -106,6 +108,16 @@ class BatteryMonitor(dbus.service.Object):
     def handle_device_added_signal(self):
         pass
 
+    @dbus.service.method(dbus_interface=MY_IFACE)
+    def Query(self):
+        pass
+
+    @dbus.service.method(dbus_interface=MY_IFACE)
+    def NotifyQuery(self):
+        pass
+
+    def act_if_needed(self):
+        pass
 
 if __name__ == "__main__":
     from dbus.mainloop.glib import DBusGMainLoop
