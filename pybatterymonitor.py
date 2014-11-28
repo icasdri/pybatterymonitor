@@ -32,6 +32,9 @@ UPOWER_PATH = "/org/freedesktop/UPower"
 UPOWER_IFACE = UPOWER_NAME
 DEV_IFACE = "org.freedesktop.UPower.Device"
 
+LOGIND_MANAGER_IFACE = "org.freedesktop.login1.Manager"
+LOGIND_SESSION_IFACE = "org.freedesktop.login1.Session"
+
 DEVICE_TYPES = {"Unknown": 0, "Line Power": 1, "Battery": 2}
 
 class BatteryMonitor(dbus.service.Object):
@@ -45,34 +48,63 @@ class BatteryMonitor(dbus.service.Object):
             self.system_bus.get_object(UPOWER_NAME, UPOWER_PATH),
             UPOWER_IFACE)
 
-        self.battery = None
-        self.battery_props = None
+        self.upower.connect_to_signal("PropertiesChanged",
+                                      self.handle_upower_signal,
+                                      dbus_interface=dbus.PROPERTIES_IFACE)
+        self.system_bus.add_signal_receiver(self.handle_prepare_for_sleep_signal,
+                                            signal_name="PrepareForSleep",
+                                            dbus_interface=LOGIND_MANAGER_IFACE)
+        self.system_bus.add_signal_receiver(self.handle_unlock_signal,
+                                            signal_name="Unlock",
+                                            dbus_interface=LOGIND_SESSION_IFACE)
 
+        self.battery = None
         self.init_battery()
 
     def init_battery(self):
         for dev_path in self.upower.EnumerateDevices():
             dev_obj = self.system_bus.get_object(UPOWER_NAME, dev_path)
             dev_props = dbus.Interface(dev_obj, dbus.PROPERTIES_IFACE)
-#
-#            import types
-#            def _dev_props_accessor(self, i):
-#                return self.Get(UPOWER_DEVICE_IFACE, i)
-#
-#            dev_props.g = types.MethodType(_dev_props_accessor, dev_props)
-#            print(dev_props.__getitem__)
-#            print(dev_props.__getitem__("Type")) # Works as expected
-#            print(dev_props["Type"]) # Does not work, dev_props still is not subscriptable
-#                    # for some reason! (i.e. the [] call didn't respect the new __getitem__ !)
-#
             if dev_props.Get(DEV_IFACE, "Type") == DEVICE_TYPES["Battery"] and \
                             dev_props.Get(DEV_IFACE, "PowerSupply") == True:
-                self.battery = dbus.Interface(dev_obj, DEV_IFACE)
-                self.battery_props = dev_props
+                self.battery = dev_props
                 log.info("Found battery {} {}".format(dev_props.Get(DEV_IFACE, "Vendor"), dev_props.Get(DEV_IFACE, "Model")))
+                self.battery.connect_to_signal("PropertiesChanged", self.handle_battery_signal)
                 break
         else:
             log.warning("No Battery device found!")
+
+    def handle_battery_signal(self, interface, data, signature):
+        if "Percentage" in data:
+            log.info("Battery now at {} percent".format(data["Percentage"]))
+
+    def handle_upower_signal(self, interface, data, signature):
+        if "OnBattery" in data:
+            if data["OnBattery"]:
+                log.info("Now running on Battery")
+            else:
+                log.info("Now running on Line Power")
+
+    def handle_unlock_signal(self):
+        log.info("A session has been unlocked")
+
+    def handle_prepare_for_sleep_signal(self, indicator):
+        if indicator == 0:
+            log.info("System is going for sleep!")
+        else:
+            log.info("System has exited sleep")
+
+    def handle_signal(self, *posargs, **kwargs):
+        #print("Positional Arguments")
+        for i, p in enumerate(posargs):
+            print("{}: {}".format(i, p))
+        #print("Keyword Arguments")
+        for k, a in kwargs.items():
+            print("{}: {}".format(k, a))
+        print()
+
+    def handle_device_added_signal(self):
+        pass
 
 
 if __name__ == "__main__":
