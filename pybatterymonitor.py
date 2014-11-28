@@ -16,6 +16,7 @@ import dbus
 import dbus.service
 import sys
 import logging
+from gi.repository import Notify
 
 log = logging.getLogger(__name__)
 log.setLevel(logging.DEBUG)
@@ -41,15 +42,22 @@ BATTERY_STATES = {0: "Unknown",
                   6: "Pending Discharge"}
 
 class BatteryMonitor(dbus.service.Object):
-    def __init__(self, system_bus, session_bus, lower_bound=40, upper_bound=80, warn_step=5):
-        self.lower_bound = 40
-        self.upper_bound = 80
-        self.warn_step = 5
+    def __init__(self, system_bus, session_bus, lower_bound=40, upper_bound=80, warn_step=5,
+                 discharge_warn_values=None, charge_warn_values=None):
+        self.lower_bound = lower_bound
+        self.upper_bound = upper_bound
+        self.warn_step = warn_step
+
+        self.discharge_warn_values = \
+            sorted(discharge_warn_values, reverse=True) if discharge_warn_values is not None else None
+        self.charge_warn_values = \
+            sorted(charge_warn_values, reverse=False) if charge_warn_values is not None else None
 
         self.system_bus = system_bus
         self.session_bus = session_bus
         bus_name = dbus.service.BusName(MY_IFACE, bus=self.session_bus)
         dbus.service.Object.__init__(self, bus_name, MY_PATH)
+        Notify.init("pybatterymonitor")
 
         self.battery = None
         self.discharging = None
@@ -72,7 +80,7 @@ class BatteryMonitor(dbus.service.Object):
                 self.battery.connect_to_signal("PropertiesChanged", self.handle_battery_signal)
                 break
         else:
-            log.warning("No Battery device found!")
+            log.error("No Battery device found!")
 
     def handle_battery_signal(self, interface, data, signature):
         if "State" in data:
@@ -82,48 +90,55 @@ class BatteryMonitor(dbus.service.Object):
 
     def new_warning_generator(self):
         if self.discharging:
-            for i in range(self.lower_bound, 0, -self.warn_step):
-                yield i
-            yield 0
+            if self.discharge_warn_values is not None:
+                for w in self.discharge_warn_values:
+                    yield w
+            else:
+                for i in range(self.lower_bound, 0, -self.warn_step):
+                    yield i
+                yield 0
         else:
-            for i in range(self.upper_bound, 100, self.warn_step):
-                yield i
-            yield 100
+            if self.charge_warn_values is not None:
+                for w in self.charge_warn_values:
+                    yield w
+            else:
+                for i in range(self.upper_bound, 100, self.warn_step):
+                    yield i
+                yield 100
 
     def warn(self, percentage):
         if self.discharging:
             warn_string = "Battery is now at {} percent. Consider ending discharge.".format(percentage)
+            warn_notification = Notify.Notification.new("{}%".format(percentage), "Consider ending discharge.", "dialog-information")
         else:
             warn_string = "Battery is now at {} percent. Consider ending charge.".format(percentage)
+            warn_notification = Notify.Notification.new("{}%".format(percentage), "Consider ending charge.", "dialog-information")
+        warn_notification.show()
         log.warning("WARNING: " + warn_string)
 
     def update_percentage(self, new_percentage):
         # If percentage and state matches that of next_warning, then warn,
         # and pop a warning from the warning generator and put it at next_warning
         # If next_warning is None, do nothing
-
-        def adjust_warnings_if_offset():
-            if not abs(new_percentage - self.next_warning) < self.warn_step:
-                log.info("Adjusting for warning offset")
-                for w in self.warning_generator:
-                    print(" -- -- discarding {}".format(w))
-                    if abs(new_percentage - w) < self.warn_step:
-                        break
-
+        log.info("- new percentage: {}".format(new_percentage))
         if self.next_warning is not None:
             if self.discharging:
                 if new_percentage <= self.next_warning:
-                    adjust_warnings_if_offset()
                     self.warn(new_percentage)
-                    self.next_warning = next(self.warning_generator, None)
+                    for w in self.warning_generator:
+                        if w < new_percentage:
+                            break
+                        log.info("   - catching up, discarding {}".format(w))
+                    self.next_warning = w
             else:
                 if new_percentage >= self.next_warning:
-                    adjust_warnings_if_offset()
                     self.warn(new_percentage)
-                    self.next_warning = next(self.warning_generator, None)
-
-        log.info(" -- new percentage: {}".format(new_percentage))
-        log.info(" -- next warning: {}".format(self.next_warning))
+                    for w in self.warning_generator:
+                        if w > new_percentage:
+                            break
+                        log.info("   - catching up, discarding {}".format(w))
+                    self.next_warning = w
+        log.info("- next warning: {}".format(self.next_warning))
 
     def update_state(self, new_state):
         # If discharge/charge changes, make a new Warning Generator to match the change
@@ -137,7 +152,7 @@ class BatteryMonitor(dbus.service.Object):
             if self.discharging:
                 self.discharging = False
                 self.update_warnings()
-        log.info(" -- new state: {}".format(BATTERY_STATES[new_state]))
+        log.info("- new state: {}".format(BATTERY_STATES[new_state]))
 
     def update_warnings(self):
         log.info("New warning set generated")
@@ -156,8 +171,10 @@ class BatteryMonitor(dbus.service.Object):
 
 if __name__ == "__main__":
     from dbus.mainloop.glib import DBusGMainLoop
-    from gobject import MainLoop
+    from gi.repository.GObject import MainLoop
     DBusGMainLoop(set_as_default=True)
-    BatteryMonitor(dbus.SystemBus(), dbus.SessionBus())
+    BatteryMonitor(dbus.SystemBus(), dbus.SessionBus(),
+                   discharge_warn_values=[38,39,40,41,42,43,44,45,46,47,48,49,50],
+                   charge_warn_values=[39,40,41,42,43,44,45,46,47,48,49,50,51])
     MainLoop().run()
 
