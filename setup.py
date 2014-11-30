@@ -9,7 +9,7 @@ setup(
     description='A small user daemon for GNU/Linux that monitors battery levels and notifies users',
     url='https://github.com/icasdri/pybatterymonitor',
     classifiers=[
-        'Development Status :: 4 - Beta',
+        'Development Status :: 3 - Alpha',
         'Intended Audience :: End Users/Desktop',
         'Topic :: Utilities',
         'License :: OSI Approved :: GPL License',
