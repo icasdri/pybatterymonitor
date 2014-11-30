@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name='pybatterymonitor',
-    version='0.3',
+    version='0.1',
     license='GPL3',
     author='icasdri',
     author_email='icasdri@gmail.com',
