@@ -242,10 +242,12 @@ class BatteryMonitor(dbus.service.Object):
         if self.battery is not None:
             pass
 
-if __name__ == "__main__":
+def main():
     from dbus.mainloop.glib import DBusGMainLoop
     from gi.repository.GObject import MainLoop
     DBusGMainLoop(set_as_default=True)
     BatteryMonitor(dbus.SystemBus(), dbus.SessionBus(),lower_bound=40, upper_bound=80, warn_step=5)
     MainLoop().run()
 
+if __name__ == "__main__":
+    main()
