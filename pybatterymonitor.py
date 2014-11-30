@@ -44,8 +44,6 @@ NOTIFY_NAME = "org.freedesktop.Notifications"
 NOTIFY_PATH = "/org/freedesktop/Notifications"
 NOTIFY_IFACE = NOTIFY_NAME
 
-EMPTY_DICT = {}
-
 
 class Notifier():
     class Notification():
@@ -91,7 +89,7 @@ class Notifier():
                                  notification.summary,
                                  notification.body,
                                  [x for x in notification.actions[::2] for i in range(2)],
-                                 EMPTY_DICT,  # We don't add any hints
+                                 {},  # We don't add any hints
                                  notification.timeout if notification.timeout != -1 else self.default_timeout)
         notification.id = id
         self.notifications[id] = notification
@@ -248,6 +246,6 @@ if __name__ == "__main__":
     from dbus.mainloop.glib import DBusGMainLoop
     from gi.repository.GObject import MainLoop
     DBusGMainLoop(set_as_default=True)
-    BatteryMonitor(dbus.SystemBus(), dbus.SessionBus(),lower_bound=80, upper_bound=40, warn_step=1)
+    BatteryMonitor(dbus.SystemBus(), dbus.SessionBus(),lower_bound=40, upper_bound=80, warn_step=5)
     MainLoop().run()
 
