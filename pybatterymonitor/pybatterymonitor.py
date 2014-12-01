@@ -1,5 +1,5 @@
-#!/usr/bin/env python3
-
+# Copyright 2014 icasdri
+#
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
@@ -59,15 +59,18 @@ class Notifier():
             self.replaces_id = replaces.id if replaces is not None else 0
 
     def __init__(self, session_bus, app_name, app_icon="dialog-information", default_timeout=-1):
-        self.notifyd = dbus.Interface(session_bus.get_object(NOTIFY_NAME, NOTIFY_PATH), NOTIFY_IFACE)
+        self._session_bus = session_bus
         self.notifications = {}
 
         self.app_name = app_name
         self.app_icon = app_icon
         self.default_timeout = default_timeout
 
-        self.notifyd.connect_to_signal("NotificationClosed", self._handle_notification_closed_signal)
-        self.notifyd.connect_to_signal("ActionInvoked", self._handle_action_invoked_signal)
+        self._notifyd().connect_to_signal("NotificationClosed", self._handle_notification_closed_signal)
+        self._notifyd().connect_to_signal("ActionInvoked", self._handle_action_invoked_signal)
+
+    def _notifyd(self):
+        return dbus.Interface(self._session_bus.get_object(NOTIFY_NAME, NOTIFY_PATH), NOTIFY_IFACE)
 
     def _handle_notification_closed_signal(self, n_id, reason):
         if n_id in self.notifications:
@@ -84,21 +87,21 @@ class Notifier():
                 callback()
 
     def send(self, notification):
-        n_id = self.notifyd.Notify(self.app_name,
-                                   notification.replaces_id,
-                                   # Could add check here for id in self.notifications
-                                   notification.app_icon if notification.app_icon is not None else self.app_icon,
-                                   notification.summary,
-                                   notification.body,
-                                   [x for x in notification.actions[::2] for i in range(2)],
-                                   dict(),  # We don't add any hints
-                                   notification.timeout if notification.timeout != -1 else self.default_timeout)
+        n_id = self._notifyd().Notify(self.app_name,
+                                      notification.replaces_id,
+                                      # Could add check here for id in self.notifications
+                                      notification.app_icon if notification.app_icon is not None else self.app_icon,
+                                      notification.summary,
+                                      notification.body,
+                                      [x for x in notification.actions[::2] for i in range(2)],
+                                      dict(),  # We don't add any hints
+                                      notification.timeout if notification.timeout != -1 else self.default_timeout)
         notification.id = n_id
         self.notifications[n_id] = notification
 
     def close(self, notification):
         if notification.id != 0:
-            self.notifyd.CloseNotification(notification.id)
+            self._notifyd().CloseNotification(notification.id)
 
     def close_all(self):
         for notification in self.notifications.values():
@@ -136,7 +139,7 @@ class BatteryMonitor(dbus.service.Object):
             dev_obj = self.system_bus.get_object(UPOWER_NAME, dev_path)
             dev_props = dbus.Interface(dev_obj, dbus.PROPERTIES_IFACE)
             if dev_props.Get(DEV_IFACE, "Type") == DEVICE_TYPES["Battery"] and \
-               dev_props.Get(DEV_IFACE, "PowerSupply") == True:
+                            dev_props.Get(DEV_IFACE, "PowerSupply") == True:
                 self.battery = dev_props
                 log.info("Found battery {} {}".format(
                     dev_props.Get(DEV_IFACE, "Vendor"),
