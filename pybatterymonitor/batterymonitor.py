@@ -185,13 +185,41 @@ class BatteryMonitor(dbus.service.Object):
         if self.battery is not None:
             pass
 
-
+DEFAULT_CONFIG = {"lowerbound": "40",
+                  "upperbound": "80",
+                  "warnstep": "5",
+                  "dischargewarnvalues": "None",
+                  "chargewarnvalues": "None"}
 def main():
+    import os.path
+    config_file = os.path.expanduser("~") + "/.config/pybatterymonitor.conf"
+    config = {}
+    if os.path.isfile(config_file):
+        log.info("Config file found at " + config_file)
+        import configparser
+        parse = configparser.ConfigParser()
+        parse.read(config_file)
+        if "pybatterymonitor" in parse.sections():
+            for c in parse["pybatterymonitor"]:
+                log.debug("Processing config \"" + c + "\"")
+                if c not in config:
+                    config[c] = parse["pybatterymonitor"][c]
+    for c in DEFAULT_CONFIG:
+        if c not in config:
+            config[c] = DEFAULT_CONFIG[c]
+
     from dbus.mainloop.glib import DBusGMainLoop
     from gi.repository.GObject import MainLoop
 
     DBusGMainLoop(set_as_default=True)
-    BatteryMonitor(dbus.SystemBus(), dbus.SessionBus(), lower_bound=40, upper_bound=80, warn_step=5)
+    BatteryMonitor(dbus.SystemBus(), dbus.SessionBus(),
+                   lower_bound=int(config["lowerbound"]),
+                   upper_bound=int(config["upperbound"]),
+                   warn_step=int(config["warnstep"]),
+                   discharge_warn_values=[int(x) for x in config["dischargewarnvalues"].split()]
+                                          if config["dischargewarnvalues"] != "None" else None,
+                   charge_warn_values=[int(x) for x in config["chargewarnvalues"].split()]
+                                       if config["chargewarnvalues"] != "None" else None)
     MainLoop().run()
 
 
