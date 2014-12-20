@@ -24,9 +24,6 @@ from pybatterymonitor.notifier import Notifier
 
 log = logging.getLogger(__name__)
 log.setLevel(logging.DEBUG)
-_handler = logging.StreamHandler(sys.stdout)
-_handler.setLevel(logging.DEBUG)
-log.addHandler(_handler)
 
 MY_PATH = "/org/icasdri/batterymonitor"
 MY_IFACE = "org.icasdri.batterymonitor"
@@ -47,16 +44,15 @@ BATTERY_STATES = {0: "Unknown",
 
 
 class BatteryMonitor(dbus.service.Object):
-    def __init__(self, system_bus, session_bus, lower_bound=40, upper_bound=80, warn_step=5,
-                 discharge_warn_values=None, charge_warn_values=None):
-        self.lower_bound = lower_bound
-        self.upper_bound = upper_bound
-        self.warn_step = warn_step
+    def __init__(self, system_bus, session_bus,
+                 discharge_warn_values, charge_warn_values,
+                 discharge_warn_text, charge_warn_text):
 
-        self.discharge_warn_values = \
-            sorted(discharge_warn_values, reverse=True) if discharge_warn_values is not None else None
-        self.charge_warn_values = \
-            sorted(charge_warn_values, reverse=False) if charge_warn_values is not None else None
+        self.discharge_warn_values = sorted(discharge_warn_values, reverse=True)
+        self.charge_warn_values = sorted(charge_warn_values, reverse=False)
+
+        self.discharge_warn_text = discharge_warn_text
+        self.charge_warn_text = charge_warn_text
 
         self.system_bus = system_bus
         self.session_bus = session_bus
@@ -98,21 +94,11 @@ class BatteryMonitor(dbus.service.Object):
 
     def new_warning_generator(self):
         if self.discharging:
-            if self.discharge_warn_values is not None:
-                for w in self.discharge_warn_values:
-                    yield w
-            else:
-                for i in range(self.lower_bound, 0, -self.warn_step):
-                    yield i
-                yield 0
+            for w in self.discharge_warn_values:
+                yield w
         else:
-            if self.charge_warn_values is not None:
-                for w in self.charge_warn_values:
-                    yield w
-            else:
-                for i in range(self.upper_bound, 100, self.warn_step):
-                    yield i
-                yield 100
+            for w in self.charge_warn_values:
+                yield w
 
     def warn(self, percentage):
         if self.discharging:
@@ -185,41 +171,68 @@ class BatteryMonitor(dbus.service.Object):
         if self.battery is not None:
             pass
 
-DEFAULT_CONFIG = {"lowerbound": "40",
-                  "upperbound": "80",
-                  "warnstep": "5",
-                  "dischargewarnvalues": "None",
-                  "chargewarnvalues": "None"}
-def main():
+def parse_and_get_args():
+    # Command-line arguments
+    import argparse
+    a_parser = argparse.ArgumentParser(prog="pybatterymonitor",
+                                     description="Daemon for monitoring and notifying about battery levels.")
+    a_parser.add_argument("-dvals", "--discharge-warn-values", metavar='VALUES', type=int, nargs='+',
+                        help="battery percentages at which to trigger notifications when discharging")
+    a_parser.add_argument("-cvals", "--charge-warn-values", metavar='VALUES', type=int, nargs='+',
+                        help="battery percentages at which to trigger notifications when charging")
+    a_parser.add_argument("-dwarn", "--discharge-warn-text", metavar='TEXT', type=str,
+                        help="the text in notifications triggered while discharging")
+    a_parser.add_argument("-cwarn", "--charge-warn-text", metavar='TEXT', type=str,
+                        help="the text in notifications triggered while charging")
+    a_parser.add_argument("--config-file", metavar="CONFIG_FILE", type=str,
+                        help="configuration file to use")
+    a_parser.add_argument("--version", action='version', version="%(prog)s v0.2")
+    a_parser.add_argument("--verbose", action='store_true')
+    args = a_parser.parse_args()
+
+    _handler = logging.StreamHandler(sys.stdout)
+    _handler.setLevel(logging.DEBUG if args.verbose else logging.WARNING)
+    log.addHandler(_handler)
+
+    # Config file
     import os.path
-    config_file = os.path.expanduser("~") + "/.config/pybatterymonitor.conf"
-    config = {}
-    if os.path.isfile(config_file):
-        log.info("Config file found at " + config_file)
+    if args.config_file is None:
+        args.config_file = os.path.expanduser("~") + "/.config/pybatterymonitor.conf"
+    if os.path.isfile(args.config_file):
+        log.info("Config file found at " + args.config_file)
         import configparser
-        parse = configparser.ConfigParser()
-        parse.read(config_file)
-        if "pybatterymonitor" in parse.sections():
-            for c in parse["pybatterymonitor"]:
+        c_parser = configparser.ConfigParser()
+        c_parser.read(args.config_file)
+        if "pybatterymonitor" in c_parser.sections():
+            sections = c_parser["pybatterymonitor"]
+            for c in sections:
                 log.debug("Processing config \"" + c + "\"")
-                if c not in config:
-                    config[c] = parse["pybatterymonitor"][c]
+                if c not in args or getattr(args, c) is None:
+                    setattr(args, c, DEFAULT_CONFIG[c])
+
+    # Defaults
     for c in DEFAULT_CONFIG:
-        if c not in config:
-            config[c] = DEFAULT_CONFIG[c]
+        if c not in args or getattr(args, c) is None:
+            setattr(args, c, DEFAULT_CONFIG[c])
+
+    return args
+
+DEFAULT_CONFIG = {"discharge_warn_values": [i for i in range(0, 41, 5)],
+                  "charge_warn_values": [i for i in range(80, 101, 5)],
+                  "discharge_warn_text": "Consider ending discharge.",
+                  "charge_warn_text": "Consider ending charge."}
+
+def main():
+    args = parse_and_get_args()
 
     from dbus.mainloop.glib import DBusGMainLoop
     from gi.repository.GObject import MainLoop
 
     DBusGMainLoop(set_as_default=True)
+    print(args.charge_warn_text)
     BatteryMonitor(dbus.SystemBus(), dbus.SessionBus(),
-                   lower_bound=int(config["lowerbound"]),
-                   upper_bound=int(config["upperbound"]),
-                   warn_step=int(config["warnstep"]),
-                   discharge_warn_values=[int(x) for x in config["dischargewarnvalues"].split()]
-                                          if config["dischargewarnvalues"] != "None" else None,
-                   charge_warn_values=[int(x) for x in config["chargewarnvalues"].split()]
-                                       if config["chargewarnvalues"] != "None" else None)
+                   args.discharge_warn_values, args.charge_warn_values,
+                   args.discharge_warn_text, args.charge_warn_text)
     MainLoop().run()
 
 
