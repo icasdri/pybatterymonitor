@@ -102,15 +102,15 @@ class BatteryMonitor(dbus.service.Object):
 
     def warn(self, percentage):
         if self.discharging:
-            text = "Consider ending discharge."
+            text = self.discharge_warn_text
         else:
-            text = "Consider ending charge."
+            text = self.charge_warn_text
         self.notifier.send(Notifier.Notification("{}%".format(percentage),
                                                  text,
                                                  app_icon=None,
                                                  actions=["Suppress Future", self.suppress_future,
                                                           "Dismiss", None]))
-        log.warning("WARNING: Battery is now at {} percent. {}".format(percentage, text))
+        log.info("Battery is now at {} percent. {}".format(percentage, text))
 
     def suppress_future(self):
         log.info("Suppressing future warnings for this state change")
@@ -188,11 +188,23 @@ def parse_and_get_args():
                         help="configuration file to use")
     a_parser.add_argument("--version", action='version', version="%(prog)s v0.2")
     a_parser.add_argument("--verbose", action='store_true')
+    a_parser.add_argument("--debug", action='store_true')
+
+    # Parse the arguments
+    log.debug("Parsing command-line arguments...")
     args = a_parser.parse_args()
 
-    _handler = logging.StreamHandler(sys.stdout)
-    _handler.setLevel(logging.DEBUG if args.verbose else logging.WARNING)
-    log.addHandler(_handler)
+    # Adjust log to match verbosity level given and attach an appropriate handler
+    if args.debug or args.verbose:
+        log.setLevel(logging.DEBUG if args.debug else logging.INFO)
+        handler = logging.StreamHandler(sys.stdout)
+        log.addHandler(handler)
+    else:
+        log.setLevel(logging.WARNING)
+        error_handler = logging.StreamHandler(sys.stderr)
+        log.addHandler(error_handler)
+
+    log.debug("Recieved command-line arguments: {}".format(vars(args)))
 
     # Config file
     import os.path
@@ -202,13 +214,18 @@ def parse_and_get_args():
         log.info("Config file found at " + args.config_file)
         import configparser
         c_parser = configparser.ConfigParser()
+        log.debug("Reading config file...")
         c_parser.read(args.config_file)
         if "pybatterymonitor" in c_parser.sections():
             sections = c_parser["pybatterymonitor"]
             for c in sections:
                 log.debug("Processing config \"" + c + "\"")
                 if c not in args or getattr(args, c) is None:
-                    setattr(args, c, DEFAULT_CONFIG[c])
+                    if "warn_values" in c:  # if this config is a list (must parse manually)
+                        target = [int(i) for i in sections[c].strip().split(" ")]
+                    else:
+                        target = sections[c]
+                    setattr(args, c, target)
 
     # Defaults
     for c in DEFAULT_CONFIG:
@@ -227,9 +244,7 @@ def main():
 
     from dbus.mainloop.glib import DBusGMainLoop
     from gi.repository.GObject import MainLoop
-
     DBusGMainLoop(set_as_default=True)
-    print(args.charge_warn_text)
     BatteryMonitor(dbus.SystemBus(), dbus.SessionBus(),
                    args.discharge_warn_values, args.charge_warn_values,
                    args.discharge_warn_text, args.charge_warn_text)
