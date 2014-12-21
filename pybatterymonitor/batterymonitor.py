@@ -20,10 +20,10 @@ import dbus
 import dbus.service
 import sys
 import logging
+from pybatterymonitor.pybatterymonitorconfig import VERSION, TERSE_DESCRIPTION, DEFAULT_CONFIG
 from pybatterymonitor.notifier import Notifier
 
 log = logging.getLogger(__name__)
-log.setLevel(logging.DEBUG)
 
 MY_PATH = "/org/icasdri/batterymonitor"
 MY_IFACE = "org.icasdri.batterymonitor"
@@ -73,7 +73,7 @@ class BatteryMonitor(dbus.service.Object):
             dev_obj = self.system_bus.get_object(UPOWER_NAME, dev_path)
             dev_props = dbus.Interface(dev_obj, dbus.PROPERTIES_IFACE)
             if dev_props.Get(DEV_IFACE, "Type") == DEVICE_TYPES["Battery"] and \
-                            dev_props.Get(DEV_IFACE, "PowerSupply") == True:
+                           dev_props.Get(DEV_IFACE, "PowerSupply") == True:
                 self.battery = dev_props
                 log.info("Found battery {} {}".format(
                     dev_props.Get(DEV_IFACE, "Vendor"),
@@ -171,22 +171,23 @@ class BatteryMonitor(dbus.service.Object):
         if self.battery is not None:
             pass
 
+
 def parse_and_get_args():
     # Command-line arguments
     import argparse
     a_parser = argparse.ArgumentParser(prog="pybatterymonitor",
-                                     description="Daemon for monitoring and notifying about battery levels.")
+                                       description=TERSE_DESCRIPTION)
     a_parser.add_argument("-dvals", "--discharge-warn-values", metavar='VALUES', type=int, nargs='+',
-                        help="battery percentages at which to trigger notifications when discharging")
+                          help="battery percentages at which to trigger notifications when discharging")
     a_parser.add_argument("-cvals", "--charge-warn-values", metavar='VALUES', type=int, nargs='+',
-                        help="battery percentages at which to trigger notifications when charging")
+                          help="battery percentages at which to trigger notifications when charging")
     a_parser.add_argument("-dwarn", "--discharge-warn-text", metavar='TEXT', type=str,
-                        help="the text in notifications triggered while discharging")
+                          help="the text in notifications triggered while discharging")
     a_parser.add_argument("-cwarn", "--charge-warn-text", metavar='TEXT', type=str,
-                        help="the text in notifications triggered while charging")
+                          help="the text in notifications triggered while charging")
     a_parser.add_argument("--config-file", metavar="CONFIG_FILE", type=str,
-                        help="configuration file to use")
-    a_parser.add_argument("--version", action='version', version="%(prog)s v0.2")
+                          help="configuration file to use")
+    a_parser.add_argument("--version", action='version', version="%(prog)s v{}".format(VERSION))
     a_parser.add_argument("--verbose", action='store_true')
     a_parser.add_argument("--debug", action='store_true')
 
@@ -234,16 +235,13 @@ def parse_and_get_args():
 
     return args
 
-DEFAULT_CONFIG = {"discharge_warn_values": [i for i in range(0, 41, 5)],
-                  "charge_warn_values": [i for i in range(80, 101, 5)],
-                  "discharge_warn_text": "Consider ending discharge.",
-                  "charge_warn_text": "Consider ending charge."}
 
 def main():
     args = parse_and_get_args()
 
     from dbus.mainloop.glib import DBusGMainLoop
     from gi.repository.GObject import MainLoop
+
     DBusGMainLoop(set_as_default=True)
     BatteryMonitor(dbus.SystemBus(), dbus.SessionBus(),
                    args.discharge_warn_values, args.charge_warn_values,
