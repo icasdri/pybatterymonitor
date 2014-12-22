@@ -44,15 +44,14 @@ BATTERY_STATES = {0: "Unknown",
 
 
 class BatteryMonitor(dbus.service.Object):
-    def __init__(self, system_bus, session_bus,
-                 discharge_warn_values, charge_warn_values,
-                 discharge_warn_text, charge_warn_text):
+    def __init__(self, system_bus, session_bus, config_namespace):
 
-        self.discharge_warn_values = sorted(discharge_warn_values, reverse=True)
-        self.charge_warn_values = sorted(charge_warn_values, reverse=False)
-
-        self.discharge_warn_text = discharge_warn_text
-        self.charge_warn_text = charge_warn_text
+        self.discharge_warn_values = sorted(config_namespace.discharge_warn_values, reverse=True)
+        self.charge_warn_values = sorted(config_namespace.charge_warn_values, reverse=False)
+        self.discharge_warn_text = config_namespace.discharge_warn_text
+        self.charge_warn_text = config_namespace.charge_warn_text
+        self.notification_query_summary = config_namespace.notification_query_summary
+        self.notification_query_body = config_namespace.notification_query_body
 
         self.system_bus = system_bus
         self.session_bus = session_bus
@@ -65,6 +64,7 @@ class BatteryMonitor(dbus.service.Object):
         self.discharging = None
         self.next_warning = None
         self.warning_generator = None
+        self.prev_notification_query = None
         self.init_battery()
 
     def init_battery(self):
@@ -163,13 +163,26 @@ class BatteryMonitor(dbus.service.Object):
 
     @dbus.service.method(dbus_interface=MY_IFACE)
     def Query(self):
-        if self.battery is not None:
-            pass
+        state = self.battery.Get(DEV_IFACE, "State")
+        self.update_state(state)
+        sign = '-' if self.discharging else "+"
+        return {"vendor": self.battery.Get(DEV_IFACE, "Vendor"),
+                "model": self.battery.Get(DEV_IFACE, "Model"),
+                "percentage": self.battery.Get(DEV_IFACE, "Percentage"),
+                "power": self.battery.Get(DEV_IFACE, "EnergyRate"),
+                "energy": self.battery.Get(DEV_IFACE, "Energy"),
+                "voltage": self.battery.Get(DEV_IFACE, "Voltage"),
+                "state": BATTERY_STATES[state],
+                "sign": sign}
 
     @dbus.service.method(dbus_interface=MY_IFACE)
     def NotifyQuery(self):
-        if self.battery is not None:
-            pass
+        query_results = self.Query()
+        n = Notifier.Notification(self.notification_query_summary.format(**query_results),
+                                  self.notification_query_body.format(**query_results),
+                                  replaces=self.prev_notification_query)
+        self.notifier.send(n)
+        self.prev_notification_query = n
 
 
 def parse_and_get_args():
@@ -185,6 +198,10 @@ def parse_and_get_args():
                           help="the text in notifications triggered while discharging")
     a_parser.add_argument("-cwarn", "--charge-warn-text", metavar='TEXT', type=str,
                           help="the text in notifications triggered while charging")
+    a_parser.add_argument("-qsummary", "--notification-query-summary", metavar='SUMMARY', type=str,
+                          help="format string of the summary/title of the notification shown upon query")
+    a_parser.add_argument("-qbody", "--notification-query-body", metavar='BODY', type=str,
+                          help="format string of the body of the notification shown upon query")
     a_parser.add_argument("--config-file", metavar="CONFIG_FILE", type=str,
                           help="configuration file to use")
     a_parser.add_argument("--version", action='version', version="%(prog)s v{}".format(VERSION))
@@ -220,7 +237,7 @@ def parse_and_get_args():
         if "pybatterymonitor" in c_parser.sections():
             sections = c_parser["pybatterymonitor"]
             for c in sections:
-                log.debug("Processing config \"" + c + "\"")
+                log.debug("Processing config file option '{}'".format(c))
                 if c not in args or getattr(args, c) is None:
                     if "warn_values" in c:  # if this config is a list (must parse manually)
                         target = [int(i) for i in sections[c].strip().split(" ")]
@@ -231,6 +248,7 @@ def parse_and_get_args():
     # Defaults
     for c in DEFAULT_CONFIG:
         if c not in args or getattr(args, c) is None:
+            log.debug("Using defualt config for '{}'".format(c))
             setattr(args, c, DEFAULT_CONFIG[c])
 
     return args
@@ -243,9 +261,7 @@ def main():
     from gi.repository.GObject import MainLoop
 
     DBusGMainLoop(set_as_default=True)
-    BatteryMonitor(dbus.SystemBus(), dbus.SessionBus(),
-                   args.discharge_warn_values, args.charge_warn_values,
-                   args.discharge_warn_text, args.charge_warn_text)
+    BatteryMonitor(dbus.SystemBus(), dbus.SessionBus(), args)
     MainLoop().run()
 
 

@@ -35,7 +35,7 @@ class Notifier():
             self.actions = actions if actions is not None else []
             self.timeout = timeout
             self.obj = obj
-            self.replaces_id = replaces.id if replaces is not None else 0
+            self.replaces_id = replaces._id if replaces is not None else 0
 
     def __init__(self, session_bus, app_name, app_icon="dialog-information", default_timeout=-1):
         self._session_bus = session_bus

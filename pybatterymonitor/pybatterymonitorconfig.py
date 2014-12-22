@@ -20,6 +20,8 @@ VERSION = 0.2
 DEFAULT_CONFIG = {"discharge_warn_values": [i for i in range(0, 41, 5)],
                   "charge_warn_values": [i for i in range(80, 101, 5)],
                   "discharge_warn_text": "Consider ending discharge.",
-                  "charge_warn_text": "Consider ending charge."}
+                  "charge_warn_text": "Consider ending charge.",
+                  "notification_query_summary": "{percentage}%",
+                  "notification_query_body": "{state}: {sign}{power:.3f}W"}
 TERSE_DESCRIPTION = "Daemon for monitoring and notifying about battery levels."
 DESCRIPTION = "A small user daemon for GNU/Linux that monitors battery levels and notifies users"
