@@ -61,6 +61,7 @@ class BatteryMonitor(dbus.service.Object):
         self.notifier = Notifier(self.session_bus, "pybatterymonitor")
 
         self.battery = None
+        self.battery_obj = None
         self.discharging = None
         self.next_warning = None
         self.warning_generator = None
@@ -75,9 +76,11 @@ class BatteryMonitor(dbus.service.Object):
             if dev_props.Get(DEV_IFACE, "Type") == DEVICE_TYPES["Battery"] and \
                            dev_props.Get(DEV_IFACE, "PowerSupply") == True:
                 self.battery = dev_props
-                log.info("Found battery {} {}".format(
+                self.battery_obj = dbus.Interface(dev_obj, "org.freedesktop.UPower.Device")
+                log.info("Found battery {} {} ( {} )".format(
                     dev_props.Get(DEV_IFACE, "Vendor"),
-                    dev_props.Get(DEV_IFACE, "Model")))
+                    dev_props.Get(DEV_IFACE, "Model"),
+                    dev_path))
                 self.update_state(self.battery.Get(DEV_IFACE, "State"))
                 self.update_warnings()
                 self.update_percentage(self.battery.Get(DEV_IFACE, "Percentage"))
@@ -143,17 +146,21 @@ class BatteryMonitor(dbus.service.Object):
                     self.next_warning = w
         log.info("- next warning: {}".format(self.next_warning))
 
+    def _get_state(self, state_int):
+        state_str = BATTERY_STATES[state_int]
+        if state_str in ("Discharging", "Empty", "Pending Discharge"):
+            discharging = True
+        elif state_str in ("Charging", "Fully Charged", "Pending Charge"):
+            discharging = False
+        return discharging, state_str
+
     def update_state(self, new_state):
         # If discharge/charge changes, make a new Warning Generator to match the change
-        if BATTERY_STATES[new_state] in ("Discharging", "Empty", "Pending Discharge"):
-            if not self.discharging:
-                self.discharging = True
-                self.update_warnings()
-        elif BATTERY_STATES[new_state] in ("Charging", "Fully Charged", "Pending Charge"):
-            if self.discharging:
-                self.discharging = False
-                self.update_warnings()
-        log.info("- new state: {}".format(BATTERY_STATES[new_state]))
+        discharging_new, state_str = self._get_state(new_state)
+        if self.discharging != discharging_new:
+            self.discharging = discharging_new
+            self.update_warnings()
+        log.info("- new state: {}".format(state_str))
 
     def update_warnings(self):
         log.info("New warning set generated")
@@ -163,20 +170,25 @@ class BatteryMonitor(dbus.service.Object):
 
     @dbus.service.method(dbus_interface=MY_IFACE)
     def Query(self):
-        state = self.battery.Get(DEV_IFACE, "State")
-        self.update_state(state)
-        sign = '-' if self.discharging else "+"
+        log.info("Recieved method call Query")
+        # Refreshing device data requires org.freedesktop.upower.refresh-power-source authorization (via polkit)
+        log.debug("Refreshing UPower device data...")
+        self.battery_obj.Refresh()
+        state_int = self.battery.Get(DEV_IFACE, "State")
+        discharging, state_str = self._get_state(state_int)
+        sign = '-' if discharging else "+"
         return {"vendor": self.battery.Get(DEV_IFACE, "Vendor"),
                 "model": self.battery.Get(DEV_IFACE, "Model"),
                 "percentage": self.battery.Get(DEV_IFACE, "Percentage"),
                 "power": self.battery.Get(DEV_IFACE, "EnergyRate"),
                 "energy": self.battery.Get(DEV_IFACE, "Energy"),
                 "voltage": self.battery.Get(DEV_IFACE, "Voltage"),
-                "state": BATTERY_STATES[state],
+                "state": state_str,
                 "sign": sign}
 
     @dbus.service.method(dbus_interface=MY_IFACE)
     def NotifyQuery(self):
+        log.info("Recieved method call NotifyQuery")
         query_results = self.Query()
         n = Notifier.Notification(self.notification_query_summary.format(**query_results),
                                   self.notification_query_body.format(**query_results),
