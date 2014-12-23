@@ -16,7 +16,7 @@
 # along with pybatterymonitor.  If not, see <http://www.gnu.org/licenses/>.
 __author__ = 'icasdri'
 
-VERSION = 0.2
+VERSION = 0.3
 DEFAULT_CONFIG = {"discharge_warn_values": [i for i in range(0, 41, 5)],
                   "charge_warn_values": [i for i in range(80, 101, 5)],
                   "discharge_warn_text": "Consider ending discharge.",
