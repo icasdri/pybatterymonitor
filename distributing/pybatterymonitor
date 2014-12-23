@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 # Copyright 2014 icasdri
 #
 # This file is part of pybatterymonitor.
@@ -16,25 +17,7 @@
 # along with pybatterymonitor.  If not, see <http://www.gnu.org/licenses/>.
 __author__ = 'icasdri'
 
-from pybatterymonitor.pybatterymonitorconfig import VERSION, DESCRIPTION
-from distutils.core import setup
-
-setup(
-    name='pybatterymonitor',
-    version=str(VERSION),
-    license='GPL3',
-    author='icasdri',
-    author_email='icasdri@gmail.com',
-    description=DESCRIPTION,
-    url='https://github.com/icasdri/pybatterymonitor',
-    classifiers=[
-        'Development Status :: 4 - Beta',
-        'Intended Audience :: End Users/Desktop',
-        'Topic :: Utilities',
-        'License :: OSI Approved :: GPL License',
-        'Programming Language :: Python',
-        'Programming Language :: Python :: 3'
-    ],
-    packages=['pybatterymonitor'],
-    scripts=['distributing/pybatterymonitor']
-)
+# pybattery monitor main script
+if __name__ == "__main__":
+    from pybatterymonitor.batterymonitor import main
+    main()
