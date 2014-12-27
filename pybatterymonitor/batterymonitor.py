@@ -53,98 +53,62 @@ class BatteryMonitor(dbus.service.Object):
         self.notification_query_summary = config_namespace.notification_query_summary
         self.notification_query_body = config_namespace.notification_query_body
 
-        self.system_bus = system_bus
-        self.session_bus = session_bus
-        bus_name = dbus.service.BusName(MY_IFACE, bus=self.session_bus)
+        self._system_bus = system_bus
+        self._session_bus = session_bus
+        bus_name = dbus.service.BusName(MY_IFACE, bus=self._session_bus)
         dbus.service.Object.__init__(self, bus_name, MY_PATH)
 
-        self.notifier = Notifier(self.session_bus, "pybatterymonitor")
+        self._notifier = Notifier(self._session_bus, "pybatterymonitor")
 
-        self.battery = None
-        self.battery_obj = None
-        self.discharging = None
-        self.next_warning = None
-        self.warning_generator = None
-        self.prev_notification_query = None
-        self.init_battery()
+        self._battery = None
+        self._battery_obj = None
+        self._discharging = None
+        self._next_warning = None
+        self._warning_generator = None
+        self._prev_notification_query = None
 
-    def init_battery(self):
-        upower = dbus.Interface(self.system_bus.get_object(UPOWER_NAME, UPOWER_PATH), UPOWER_IFACE)
+        self._init_battery()
+
+    def _init_battery(self):
+        upower = dbus.Interface(self._system_bus.get_object(UPOWER_NAME, UPOWER_PATH), UPOWER_IFACE)
         for dev_path in upower.EnumerateDevices():
-            dev_obj = self.system_bus.get_object(UPOWER_NAME, dev_path)
+            dev_obj = self._system_bus.get_object(UPOWER_NAME, dev_path)
             dev_props = dbus.Interface(dev_obj, dbus.PROPERTIES_IFACE)
             if dev_props.Get(DEV_IFACE, "Type") == DEVICE_TYPES["Battery"] and \
                            dev_props.Get(DEV_IFACE, "PowerSupply") == True:
-                self.battery = dev_props
-                self.battery_obj = dbus.Interface(dev_obj, "org.freedesktop.UPower.Device")
+                self._battery = dev_props
+                self._battery_obj = dbus.Interface(dev_obj, "org.freedesktop.UPower.Device")
                 log.info("Found battery {} {} ( {} )".format(
                     dev_props.Get(DEV_IFACE, "Vendor"),
                     dev_props.Get(DEV_IFACE, "Model"),
                     dev_path))
-                self.update_state(self.battery.Get(DEV_IFACE, "State"))
-                self.update_warnings()
-                self.update_percentage(self.battery.Get(DEV_IFACE, "Percentage"))
-                self.battery.connect_to_signal("PropertiesChanged", self.handle_battery_signal)
+                self.update_state(self._battery.Get(DEV_IFACE, "State"))
+                self._update_warnings()
+                self.update_percentage(self._battery.Get(DEV_IFACE, "Percentage"))
+                self._battery.connect_to_signal("PropertiesChanged", self._handle_battery_signal)
                 break
         else:
             log.error("No Battery device found!")
 
-    def handle_battery_signal(self, interface, data, signature):
+    def _handle_battery_signal(self, interface, data, signature):
         if "State" in data:
             self.update_state(data["State"])
         if "Percentage" in data:
             self.update_percentage(data["Percentage"])
 
-    def new_warning_generator(self):
-        if self.discharging:
+    def _new_warning_generator(self):
+        if self._discharging:
             for w in self.discharge_warn_values:
                 yield w
         else:
             for w in self.charge_warn_values:
                 yield w
 
-    def warn(self, percentage):
-        if self.discharging:
-            text = self.discharge_warn_text
-        else:
-            text = self.charge_warn_text
-        self.notifier.send(Notifier.Notification("{}%".format(percentage),
-                                                 text,
-                                                 app_icon=None,
-                                                 actions=["Suppress Future", self.suppress_future,
-                                                          "Dismiss", None]))
-        log.info("Battery is now at {} percent. {}".format(percentage, text))
-
-    def suppress_future(self):
-        log.info("Suppressing future warnings for this state change")
-        self.next_warning = None
-        log.info("- next warning: {}".format(self.next_warning))
-
-    def update_percentage(self, new_percentage):
-        # If percentage and state matches that of next_warning, then warn,
-        # and pop a warning from the warning generator and put it at next_warning
-        # If next_warning is None, do nothing
-        log.info("- new percentage: {}".format(new_percentage))
-        if self.next_warning is not None:
-            if self.discharging:
-                if new_percentage <= self.next_warning:
-                    self.warn(new_percentage)
-                    w = None
-                    for w in self.warning_generator:
-                        if w < new_percentage:
-                            break
-                        log.info("   - catching up, discarding {}".format(w))
-                    self.next_warning = w
-            else:
-                if new_percentage >= self.next_warning:
-                    self.warn(new_percentage)
-                    w = None
-                    for w in self.warning_generator:
-                        if w > new_percentage:
-                            break
-                        log.info("   - catching up, discarding {}".format(w))
-                    self.next_warning = w
-        log.info("- next warning: {}".format(self.next_warning))
+    def _update_warnings(self):
+        log.info("New warning set generated")
+        self._notifier.close_all()
+        self._warning_generator = self._new_warning_generator()
+        self._next_warning = next(self._warning_generator, None)
 
     def _get_state(self, state_int):
         state_str = BATTERY_STATES[state_int]
@@ -157,32 +121,69 @@ class BatteryMonitor(dbus.service.Object):
     def update_state(self, new_state):
         # If discharge/charge changes, make a new Warning Generator to match the change
         discharging_new, state_str = self._get_state(new_state)
-        if self.discharging != discharging_new:
-            self.discharging = discharging_new
-            self.update_warnings()
+        if self._discharging != discharging_new:
+            self._discharging = discharging_new
+            self._update_warnings()
         log.info("- new state: {}".format(state_str))
 
-    def update_warnings(self):
-        log.info("New warning set generated")
-        self.notifier.close_all()
-        self.warning_generator = self.new_warning_generator()
-        self.next_warning = next(self.warning_generator, None)
+    def update_percentage(self, new_percentage):
+        # If percentage and state matches that of next_warning, then warn,
+        # and pop a warning from the warning generator and put it at next_warning
+        # If next_warning is None, do nothing
+        log.info("- new percentage: {}".format(new_percentage))
+        if self._next_warning is not None:
+            if self._discharging:
+                if new_percentage <= self._next_warning:
+                    self.warn(new_percentage)
+                    w = None
+                    for w in self._warning_generator:
+                        if w < new_percentage:
+                            break
+                        log.info("   - catching up, discarding {}".format(w))
+                    self._next_warning = w
+            else:
+                if new_percentage >= self._next_warning:
+                    self.warn(new_percentage)
+                    w = None
+                    for w in self._warning_generator:
+                        if w > new_percentage:
+                            break
+                        log.info("   - catching up, discarding {}".format(w))
+                    self._next_warning = w
+        log.info("- next warning: {}".format(self._next_warning))
+
+    def warn(self, percentage):
+        if self._discharging:
+            text = self.discharge_warn_text
+        else:
+            text = self.charge_warn_text
+        self._notifier.send(Notifier.Notification("{}%".format(percentage),
+                                                 text,
+                                                 app_icon=None,
+                                                 actions=["Suppress Future", self.suppress_future,
+                                                          "Dismiss", None]))
+        log.info("Battery is now at {} percent. {}".format(percentage, text))
+
+    def suppress_future(self):
+        log.info("Suppressing future warnings for this state change")
+        self._next_warning = None
+        log.info("- next warning: {}".format(self._next_warning))
 
     @dbus.service.method(dbus_interface=MY_IFACE)
     def Query(self):
         log.info("Recieved method call Query")
         # Refreshing device data requires org.freedesktop.upower.refresh-power-source authorization (via polkit)
         log.debug("Refreshing UPower device data...")
-        self.battery_obj.Refresh()
-        state_int = self.battery.Get(DEV_IFACE, "State")
+        self._battery_obj.Refresh()
+        state_int = self._battery.Get(DEV_IFACE, "State")
         discharging, state_str = self._get_state(state_int)
         sign = '-' if discharging else "+"
-        return {"vendor": self.battery.Get(DEV_IFACE, "Vendor"),
-                "model": self.battery.Get(DEV_IFACE, "Model"),
-                "percentage": self.battery.Get(DEV_IFACE, "Percentage"),
-                "power": self.battery.Get(DEV_IFACE, "EnergyRate"),
-                "energy": self.battery.Get(DEV_IFACE, "Energy"),
-                "voltage": self.battery.Get(DEV_IFACE, "Voltage"),
+        return {"vendor": self._battery.Get(DEV_IFACE, "Vendor"),
+                "model": self._battery.Get(DEV_IFACE, "Model"),
+                "percentage": self._battery.Get(DEV_IFACE, "Percentage"),
+                "power": self._battery.Get(DEV_IFACE, "EnergyRate"),
+                "energy": self._battery.Get(DEV_IFACE, "Energy"),
+                "voltage": self._battery.Get(DEV_IFACE, "Voltage"),
                 "state": state_str,
                 "sign": sign}
 
@@ -192,12 +193,12 @@ class BatteryMonitor(dbus.service.Object):
         query_results = self.Query()
         n = Notifier.Notification(self.notification_query_summary.format(**query_results),
                                   self.notification_query_body.format(**query_results),
-                                  replaces=self.prev_notification_query)
-        self.notifier.send(n)
-        self.prev_notification_query = n
+                                  replaces=self._prev_notification_query)
+        self._notifier.send(n)
+        self._prev_notification_query = n
 
 
-def parse_and_get_args():
+def _parse_args(options=None):
     # Command-line arguments
     import argparse
     a_parser = argparse.ArgumentParser(prog="pybatterymonitor",
@@ -222,7 +223,10 @@ def parse_and_get_args():
 
     # Parse the arguments
     log.debug("Parsing command-line arguments...")
-    args = a_parser.parse_args()
+    if options is None:
+        args = a_parser.parse_args()
+    else:
+        args = a_parser.parse_args(options)
 
     # Adjust log to match verbosity level given and attach an appropriate handler
     if args.debug or args.verbose:
@@ -266,14 +270,17 @@ def parse_and_get_args():
     return args
 
 
-def main():
-    args = parse_and_get_args()
+def entry_point(options=None):
+    args = _parse_args(options)
+    BatteryMonitor(dbus.SystemBus(), dbus.SessionBus(), args)
 
+
+def main(options=None):
     from dbus.mainloop.glib import DBusGMainLoop
     from gi.repository.GObject import MainLoop
 
     DBusGMainLoop(set_as_default=True)
-    BatteryMonitor(dbus.SystemBus(), dbus.SessionBus(), args)
+    entry_point(options)
     MainLoop().run()
 
 

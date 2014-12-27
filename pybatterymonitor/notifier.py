@@ -39,7 +39,7 @@ class Notifier():
 
     def __init__(self, session_bus, app_name, app_icon="dialog-information", default_timeout=-1):
         self._session_bus = session_bus
-        self.notifications = {}
+        self._notifications = {}
 
         self.app_name = app_name
         self.app_icon = app_icon
@@ -52,16 +52,16 @@ class Notifier():
         return dbus.Interface(self._session_bus.get_object(NOTIFY_NAME, NOTIFY_PATH), NOTIFY_IFACE)
 
     def _handle_notification_closed_signal(self, n_id, reason):
-        if n_id in self.notifications:
-            del self.notifications[n_id]
+        if n_id in self._notifications:
+            del self._notifications[n_id]
 
     def _handle_action_invoked_signal(self, n_id, action):
-        if n_id in self.notifications:
+        if n_id in self._notifications:
             i = None
-            for i, a in enumerate(self.notifications[n_id].actions):
+            for i, a in enumerate(self._notifications[n_id].actions):
                 if i % 2 == 0 and a == action:
                     break
-            callback = self.notifications[n_id].actions[i + 1] if i is not None else None
+            callback = self._notifications[n_id].actions[i + 1] if i is not None else None
             if callback is not None:
                 callback()
 
@@ -78,7 +78,7 @@ class Notifier():
                               notification.timeout if notification.timeout != -1 else self.default_timeout)
         notification._id = n_id
         notification._server_bus_name = notifyd.bus_name
-        self.notifications[n_id] = notification
+        self._notifications[n_id] = notification
 
     def close(self, notification):
         notifyd = self._notifyd()
@@ -86,10 +86,10 @@ class Notifier():
             if notification._server_bus_name == notifyd.bus_name:
                 notifyd.CloseNotification(notification._id)
             else:
-                if notification._id in self.notifications:
-                    del self.notifications[notification._id]
+                if notification._id in self._notifications:
+                    del self._notifications[notification._id]
 
     def close_all(self):
-        for notification in self.notifications.values():
+        for notification in self._notifications.values():
             self.close(notification)
 
