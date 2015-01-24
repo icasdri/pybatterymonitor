@@ -20,8 +20,8 @@ import dbus
 import dbus.service
 import sys
 import logging
+from gi.repository import Notify
 from pybatterymonitor.pybatterymonitorconfig import VERSION, TERSE_DESCRIPTION, DEFAULT_CONFIG
-from pybatterymonitor.notifier import Notifier
 
 log = logging.getLogger(__name__)
 
@@ -58,14 +58,14 @@ class BatteryMonitor(dbus.service.Object):
         bus_name = dbus.service.BusName(MY_IFACE, bus=self._session_bus)
         dbus.service.Object.__init__(self, bus_name, MY_PATH)
 
-        self._notifier = Notifier(self._session_bus, "pybatterymonitor")
+        Notify.init("pybatterymonitor")
+        self._notifications = []
 
         self._battery = None
         self._battery_obj = None
         self._discharging = None
         self._next_warning = None
         self._warning_generator = None
-        self._prev_notification_query = None
 
         self._init_battery()
 
@@ -90,6 +90,9 @@ class BatteryMonitor(dbus.service.Object):
         else:
             log.error("No Battery device found!")
 
+    def _notification_icon(self):
+        return "dialog-information"  # Can be replaced later with actual icon logic
+
     def _handle_battery_signal(self, interface, data, signature):
         if "State" in data:
             self.update_state(data["State"])
@@ -106,7 +109,9 @@ class BatteryMonitor(dbus.service.Object):
 
     def _update_warnings(self):
         log.info("New warning set generated")
-        self._notifier.close_all()
+        for notification in self._notifications:
+            notification.close()
+        self._notifications.clear()
         self._warning_generator = self._new_warning_generator()
         self._next_warning = next(self._warning_generator, None)
 
@@ -157,14 +162,14 @@ class BatteryMonitor(dbus.service.Object):
             text = self.discharge_warn_text
         else:
             text = self.charge_warn_text
-        self._notifier.send(Notifier.Notification("{}%".format(percentage),
-                                                 text,
-                                                 app_icon=None,
-                                                 actions=["Suppress Future", self.suppress_future,
-                                                          "Dismiss", None]))
+        notification = Notify.Notification.new("{}%".format(percentage), text, self._notification_icon())
+        notification.add_action("suppress_future", "Suppress Future", self.suppress_future)
+        notification.add_action("dismiss", "Dismiss", lambda n, a: n.close())
+        self._notifications.append(notification)
+        notification.show()
         log.info("Battery is now at {} percent. {}".format(percentage, text))
 
-    def suppress_future(self):
+    def suppress_future(self, notification, action_name):
         log.info("Suppressing future warnings for this state change")
         self._next_warning = None
         log.info("- next warning: {}".format(self._next_warning))
@@ -188,14 +193,12 @@ class BatteryMonitor(dbus.service.Object):
                 "sign": sign}
 
     @dbus.service.method(dbus_interface=MY_IFACE)
-    def NotifyQuery(self):
-        log.info("Recieved method call NotifyQuery")
+    def NotifyQuery(self, notification=Notify.Notification.new("", "", "")):
         query_results = self.Query()
-        n = Notifier.Notification(self.notification_query_summary.format(**query_results),
-                                  self.notification_query_body.format(**query_results),
-                                  replaces=self._prev_notification_query)
-        self._notifier.send(n)
-        self._prev_notification_query = n
+        notification.update(self.notification_query_summary.format(**query_results),
+                            self.notification_query_body.format(**query_results),
+                            self._notification_icon())
+        notification.show()
 
 
 def _parse_args(options=None):

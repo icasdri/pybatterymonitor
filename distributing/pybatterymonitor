@@ -17,7 +17,7 @@
 # along with pybatterymonitor.  If not, see <http://www.gnu.org/licenses/>.
 __author__ = 'icasdri'
 
-# pybattery monitor main script
+# pybatterymonitor main script
 if __name__ == "__main__":
     from pybatterymonitor.batterymonitor import main
     main()
