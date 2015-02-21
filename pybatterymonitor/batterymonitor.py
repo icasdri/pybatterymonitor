@@ -18,6 +18,7 @@ __author__ = 'icasdri'
 
 import dbus
 import dbus.service
+from dbus.exceptions import DBusException
 import sys
 import logging
 from gi.repository import Notify
@@ -91,7 +92,10 @@ class BatteryMonitor(dbus.service.Object):
             log.error("No Battery device found!")
 
     def _notification_icon(self):
-        return "dialog-information"  # Can be replaced later with actual icon logic
+        try:
+            return self._battery.Get(DEV_IFACE, "IconName")
+        except DBusException:
+            return "dialog-information"
 
     def _handle_battery_signal(self, interface, data, signature):
         if "State" in data:
