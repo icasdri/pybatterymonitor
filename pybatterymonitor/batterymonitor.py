@@ -26,8 +26,9 @@ from pybatterymonitor.pybatterymonitorconfig import VERSION, TERSE_DESCRIPTION, 
 
 log = logging.getLogger(__name__)
 
+MY_BUS_NAME = "org.icasdri.batterymonitor"
 MY_PATH = "/org/icasdri/batterymonitor"
-MY_IFACE = "org.icasdri.batterymonitor"
+MY_IFACE = MY_BUS_NAME
 
 UPOWER_NAME = "org.freedesktop.UPower"
 UPOWER_PATH = "/org/freedesktop/UPower"
@@ -56,7 +57,7 @@ class BatteryMonitor(dbus.service.Object):
 
         self._system_bus = system_bus
         self._session_bus = session_bus
-        bus_name = dbus.service.BusName(MY_IFACE, bus=self._session_bus)
+        bus_name = dbus.service.BusName(MY_BUS_NAME, bus=self._session_bus)
         dbus.service.Object.__init__(self, bus_name, MY_PATH)
 
         Notify.init("pybatterymonitor")
@@ -224,6 +225,8 @@ def _parse_args(options=None):
                           help="format string of the body of the notification shown upon query")
     a_parser.add_argument("--config-file", metavar="CONFIG_FILE", type=str,
                           help="configuration file to use")
+    a_parser.add_argument("--call", metavar='METHOD', help="method to call on running daemon")
+    a_parser.add_argument("--notify-query", action='store_true', help="call NotifyQuery on running daemon")
     a_parser.add_argument("--version", action='version', version="%(prog)s v{}".format(VERSION))
     a_parser.add_argument("--verbose", action='store_true')
     a_parser.add_argument("--debug", action='store_true')
@@ -246,6 +249,22 @@ def _parse_args(options=None):
         log.addHandler(error_handler)
 
     log.debug("Recieved command-line arguments: {}".format(vars(args)))
+
+    if dbus.SessionBus().name_has_owner(MY_BUS_NAME):
+        if args.call is None and args.notify_query:
+            args.call = "NotifyQuery"
+
+        if args.call is not None:
+            log.info("Calling method {} on running daemon".format(args.call))
+            try:
+                getattr(dbus.SessionBus().get_object(MY_BUS_NAME, MY_PATH), args.call)()
+            except DBusException as ex:
+                log.error("{}\nFailed to call method {}. Check that the daemon is running and that the method name "
+                          "is spelled correctly.\n".format(ex, args.call))
+        else:
+            print("Daemon is already running. Exiting.")
+
+        exit()
 
     # Config file
     import os.path
