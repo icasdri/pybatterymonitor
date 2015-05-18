@@ -80,10 +80,10 @@ class BatteryMonitor(dbus.service.Object):
                            dev_props.Get(DEV_IFACE, "PowerSupply") == True:
                 self._battery = dev_props
                 self._battery_obj = dbus.Interface(dev_obj, "org.freedesktop.UPower.Device")
-                log.info("Found battery {} {} ( {} )".format(
-                    dev_props.Get(DEV_IFACE, "Vendor"),
-                    dev_props.Get(DEV_IFACE, "Model"),
-                    dev_path))
+                log.info("Found battery %s %s ( %s )",
+                         dev_props.Get(DEV_IFACE, "Vendor"),
+                         dev_props.Get(DEV_IFACE, "Model"),
+                         dev_path)
                 self.update_state(self._battery.Get(DEV_IFACE, "State"))
                 self._update_warnings()
                 self.update_percentage(self._battery.Get(DEV_IFACE, "Percentage"))
@@ -134,13 +134,13 @@ class BatteryMonitor(dbus.service.Object):
         if self._discharging != discharging_new:
             self._discharging = discharging_new
             self._update_warnings()
-        log.info("- new state: {}".format(state_str))
+        log.info("- new state: %s", state_str)
 
     def update_percentage(self, new_percentage):
         # If percentage and state matches that of next_warning, then warn,
         # and pop a warning from the warning generator and put it at next_warning
         # If next_warning is None, do nothing
-        log.info("- new percentage: {}".format(new_percentage))
+        log.info("- new percentage: %d", new_percentage)
         if self._next_warning is not None:
             if self._discharging:
                 if new_percentage <= self._next_warning:
@@ -149,7 +149,7 @@ class BatteryMonitor(dbus.service.Object):
                     for w in self._warning_generator:
                         if w < new_percentage:
                             break
-                        log.info("   - catching up, discarding {}".format(w))
+                        log.info("   - catching up, discarding %d", w)
                     self._next_warning = w
             else:
                 if new_percentage >= self._next_warning:
@@ -158,9 +158,9 @@ class BatteryMonitor(dbus.service.Object):
                     for w in self._warning_generator:
                         if w > new_percentage:
                             break
-                        log.info("   - catching up, discarding {}".format(w))
+                        log.info("   - catching up, discarding %d", w)
                     self._next_warning = w
-        log.info("- next warning: {}".format(self._next_warning))
+        log.info("- next warning: %d", self._next_warning)
 
     def warn(self, percentage):
         if self._discharging:
@@ -172,12 +172,12 @@ class BatteryMonitor(dbus.service.Object):
         notification.add_action("dismiss", "Dismiss", lambda n, a: n.close())
         self._notifications.append(notification)
         notification.show()
-        log.info("Battery is now at {} percent. {}".format(percentage, text))
+        log.info("Battery is now at %d percent. %s", percentage, text)
 
     def suppress_future(self, notification, action_name):
         log.info("Suppressing future warnings for this state change")
         self._next_warning = None
-        log.info("- next warning: {}".format(self._next_warning))
+        log.info("- next warning: %d", self._next_warning)
 
     @dbus.service.method(dbus_interface=MY_IFACE)
     def Query(self):
@@ -248,19 +248,19 @@ def _parse_args(options=None):
         error_handler = logging.StreamHandler(sys.stderr)
         log.addHandler(error_handler)
 
-    log.debug("Recieved command-line arguments: {}".format(vars(args)))
+    log.debug("Recieved command-line arguments: %s", vars(args))
 
     if dbus.SessionBus().name_has_owner(MY_BUS_NAME):
         if args.call is None and args.notify_query:
             args.call = "NotifyQuery"
 
         if args.call is not None:
-            log.info("Calling method {} on running daemon".format(args.call))
+            log.info("Calling method %s on running daemon", args.call)
             try:
                 getattr(dbus.SessionBus().get_object(MY_BUS_NAME, MY_PATH), args.call)()
             except DBusException as ex:
-                log.error("{}\nFailed to call method {}. Check that the daemon is running and that the method name "
-                          "is spelled correctly.\n".format(ex, args.call))
+                log.error("%s\nFailed to call method %s. Check that the daemon is running and that the method name "
+                          "is spelled correctly.\n", ex, args.call)
         else:
             print("Daemon is already running. Exiting.")
 
@@ -279,7 +279,7 @@ def _parse_args(options=None):
         if "pybatterymonitor" in c_parser.sections():
             sections = c_parser["pybatterymonitor"]
             for c in sections:
-                log.debug("Processing config file option '{}'".format(c))
+                log.debug("Processing config file option '%s'", c)
                 if c not in args or getattr(args, c) is None:
                     if "warn_values" in c:  # if this config is a list (must parse manually)
                         target = [int(i) for i in sections[c].strip().split(" ")]
@@ -290,7 +290,7 @@ def _parse_args(options=None):
     # Defaults
     for c in DEFAULT_CONFIG:
         if c not in args or getattr(args, c) is None:
-            log.debug("Using defualt config for '{}'".format(c))
+            log.debug("Using defualt config for '%s'", c)
             setattr(args, c, DEFAULT_CONFIG[c])
 
     return args
