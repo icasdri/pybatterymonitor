@@ -99,6 +99,7 @@ class BatteryMonitor(dbus.service.Object):
             return "dialog-information"
 
     def _handle_battery_signal(self, interface, data, signature):
+        del interface, signature
         if "State" in data:
             self.update_state(data["State"])
         if "Percentage" in data:
@@ -175,6 +176,7 @@ class BatteryMonitor(dbus.service.Object):
         log.info("Battery is now at %d percent. %s", percentage, text)
 
     def suppress_future(self, notification, action_name):
+        del notification, action_name
         log.info("Suppressing future warnings for this state change")
         self._next_warning = None
         log.info("- next warning: %d", self._next_warning)
