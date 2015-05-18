@@ -253,7 +253,6 @@ def _parse_args(options=None):
     if dbus.SessionBus().name_has_owner(MY_BUS_NAME):
         if args.call is None and args.notify_query:
             args.call = "NotifyQuery"
-
         if args.call is not None:
             log.info("Calling method %s on running daemon", args.call)
             try:
@@ -263,9 +262,12 @@ def _parse_args(options=None):
                           "is spelled correctly.\n", ex, args.call)
         else:
             print("Daemon is already running. Exiting.")
-
         exit()
 
+    return args
+
+
+def _parse_config(args):
     # Config file
     import os.path
     if args.config_file is None:
@@ -297,7 +299,8 @@ def _parse_args(options=None):
 
 
 def entry_point(options=None):
-    args = _parse_args(options)
+    raw_args = _parse_args(options)
+    args = _parse_config(raw_args)
     BatteryMonitor(dbus.SystemBus(), dbus.SessionBus(), args)
 
 
