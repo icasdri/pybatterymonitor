@@ -1,2 +1,2 @@
 # pybatterymonitor [![Code Health](https://landscape.io/github/icasdri/pybatterymonitor/master/landscape.svg?style=flat-square)](https://landscape.io/github/icasdri/pybatterymonitor/master)
-** pybatterymonitor ** is a small actionable battery monitor, allowing actions such as notifications to be configured to be executed on specific battery state changes, extending the monitoring capabilities of traditional power managers.
+**pybatterymonitor** is a small actionable battery monitor, allowing actions such as notifications to be configured to be executed on specific battery state changes, extending the monitoring capabilities of traditional power managers.
